@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetLog スマホマイク録音</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .status-box {
+            background: #f5f5f5;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .status-value.connected {
+            color: #4caf50;
+        }
+        
+        .status-value.disconnected {
+            color: #f44336;
+        }
+        
+        .status-value.recording {
+            color: #ff9800;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-connect {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-connect:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-connect:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .btn-record {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .btn-record:hover:not(:disabled) {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+        }
+        
+        .btn-record:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .btn-stop {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-stop:hover:not(:disabled) {
+            background: #da190b;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4);
+        }
+        
+        .btn-stop:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 13px;
+            color: #1565c0;
+            line-height: 1.6;
+        }
+        
+        .info-box strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .waveform-container {
+            margin: 20px 0;
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        canvas {
+            width: 100%;
+            height: 100px;
+            border-radius: 5px;
+            background: #fff;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+            font-size: 12px;
+        }
+        
+        .stat-item {
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .stat-label {
+            color: #999;
+            margin-bottom: 3px;
+        }
+        
+        .stat-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 MeetLog</h1>
+        <p class="subtitle">スマホマイク録音</p>
+        
+        <div class="status-box">
+            <div class="status-label">接続状態</div>
+            <div class="status-value disconnected" id="connectionStatus">未接続</div>
+        </div>
+        
+        <div class="input-group">
+            <label for="serverUrl">サーバーアドレス</label>
+            <input 
+                type="text" 
+                id="serverUrl" 
+                placeholder="ws://192.168.1.100:8765"
+                value="ws://localhost:8765"
+            >
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-connect" id="connectBtn" onclick="connect()">接続</button>
+            <button class="btn-connect" id="disconnectBtn" onclick="disconnect()" disabled>切断</button>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-record" id="recordBtn" onclick="startRecording()" disabled>録音開始</button>
+            <button class="btn-stop" id="stopBtn" onclick="stopRecording()" disabled>録音停止</button>
+        </div>
+        
+        <div class="waveform-container">
+            <canvas id="waveform"></canvas>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-label">音量</div>
+                    <div class="stat-value" id="volumeLevel">0%</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">送信データ</div>
+                    <div class="stat-value" id="dataSize">0 KB</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-box">
+            <strong>使用方法:</strong>
+            <div>
+                1. サーバーアドレスを入力（デフォルト: localhost:8765）<br>
+                2. 「接続」ボタンをクリック<br>
+                3. 「録音開始」をクリックしてマイク許可を与える<br>
+                4. PCの録音と同時にスマホマイクも記録されます
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let processor = null;
+        let isRecording = false;
+        let totalDataSent = 0;
+        
+        const connectionStatus = document.getElementById('connectionStatus');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const serverUrlInput = document.getElementById('serverUrl');
+        const volumeLevel = document.getElementById('volumeLevel');
+        const dataSize = document.getElementById('dataSize');
+        const canvas = document.getElementById('waveform');
+        const canvasCtx = canvas.getContext('2d');
+        
+        function connect() {
+            const url = serverUrlInput.value;
+            if (!url) {
+                alert('サーバーアドレスを入力してください');
+                return;
+            }
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    console.log('WebSocket接続成功');
+                    connectionStatus.textContent = '接続済み';
+                    connectionStatus.className = 'status-value connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    recordBtn.disabled = false;
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocketエラー:', error);
+                    connectionStatus.textContent = '接続エラー';
+                    connectionStatus.className = 'status-value disconnected';
+                };
+                
+                ws.onclose = () => {
+                    console.log('WebSocket切断');
+                    connectionStatus.textContent = '未接続';
+                    connectionStatus.className = 'status-value disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    recordBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    isRecording = false;
+                };
+            } catch (error) {
+                alert('接続に失敗しました: ' + error.message);
+            }
+        }
+        
+        function disconnect() {
+            if (isRecording) {
+                stopRecording();
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        async function startRecording() {
+            try {
+                // マイクへのアクセスをリクエスト
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // AudioContextを初期化
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                
+                // ScriptProcessorNodeを作成（4096サンプル）
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                processor.onaudioprocess = (event) => {
+                    if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                        const inputData = event.inputBuffer.getChannelData(0);
+                        
+                        // 音量レベルを計算
+                        let sum = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            sum += Math.abs(inputData[i]);
+                        }
+                        const average = sum / inputData.length;
+                        const volumePercent = Math.round(average * 500); // 0-100%に正規化
+                        volumeLevel.textContent = Math.min(100, volumePercent) + '%';
+                        
+                        // 波形を描画
+                        drawWaveform(inputData);
+                        
+                        // 音声データをBase64エンコード
+                        const audioData = new Float32Array(inputData);
+                        const audioBytes = new Uint8Array(audioData.buffer);
+                        const base64Audio = btoa(String.fromCharCode.apply(null, audioBytes));
+                        
+                        // JSONメッセージを送信
+                        const message = JSON.stringify({
+                            audio: base64Audio,
+                            timestamp: Date.now()
+                        });
+                        
+                        ws.send(message);
+                        
+                        // 送信データサイズを更新
+                        totalDataSent += message.length;
+                        dataSize.textContent = (totalDataSent / 1024).toFixed(1) + ' KB';
+                    }
+                };
+                
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                isRecording = true;
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                connectionStatus.textContent = '録音中';
+                connectionStatus.className = 'status-value recording';
+                
+                console.log('録音開始');
+            } catch (error) {
+                alert('マイクへのアクセスが拒否されました: ' + error.message);
+                console.error('マイクアクセスエラー:', error);
+            }
+        }
+        
+        function stopRecording() {
+            isRecording = false;
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            
+            recordBtn.disabled = false;
+            stopBtn.disabled = true;
+            connectionStatus.textContent = '接続済み';
+            connectionStatus.className = 'status-value connected';
+            volumeLevel.textContent = '0%';
+            
+            // 波形をクリア
+            canvasCtx.fillStyle = '#fff';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            console.log('録音停止');
+        }
+        
+        function drawWaveform(data) {
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            canvasCtx.fillStyle = '#f5f5f5';
+            canvasCtx.fillRect(0, 0, width, height);
+            
+            canvasCtx.strokeStyle = '#667eea';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.beginPath();
+            
+            const sliceWidth = width / data.length;
+            let x = 0;
+            
+            for (let i = 0; i < data.length; i++) {
+                const v = data[i] / 2.0;
+                const y = height / 2 - v * height / 2;
+                
+                if (i === 0) {
+                    canvasCtx.moveTo(x, y);
+                } else {
+                    canvasCtx.lineTo(x, y);
+                }
+                
+                x += sliceWidth;
+            }
+            
+            canvasCtx.lineTo(width, height / 2);
+            canvasCtx.stroke();
+        }
+        
+        // ページロード時の初期化
+        window.addEventListener('load', () => {
+            // キャンバスのサイズを設定
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            
+            // 初期波形を描画
+            canvasCtx.fillStyle = '#f5f5f5';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        });
+        
+        // ページを離れるときの処理
+        window.addEventListener('beforeunload', () => {
+            if (isRecording) {
+                stopRecording();
+            }
+            if (ws) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>
