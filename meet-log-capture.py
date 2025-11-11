@@ -12,6 +12,12 @@ import asyncio
 import json
 import base64
 import subprocess
+import sys
+import shutil
+import warnings
+import webbrowser
+from PIL import Image
+import glob
 
 from types import SimpleNamespace
 from datetime import datetime
@@ -22,8 +28,14 @@ try:
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+warnings.filterwarnings("ignore", message="data discontinuity in recording", category=Warning)
+warnings.filterwarnings("ignore", category=UserWarning, module='soundcard')
 
 # ===== Settings =====
+def resource_path(relative_path: str) -> str:
+    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
+
 SETTINGS = SimpleNamespace()
 SETTINGS.recording = SimpleNamespace()
 SETTINGS.recording.sample_rate = 44100
@@ -34,6 +46,9 @@ SETTINGS.recording.max_duration_seconds = 7200  # 最大録音時間（秒）= 2
 SETTINGS.recording.ring_buffer_duration = 7200  # リングバッファの保持時間（秒）= 最大時間と同じ
 SETTINGS.websocket = SimpleNamespace()
 SETTINGS.websocket.port = 8765  # WebSocketサーバーのポート
+SETTINGS.ads = SimpleNamespace()
+SETTINGS.ads.folder = resource_path("ads")
+SETTINGS.ads.interval_seconds = 15
 
 # ===== Language =====
 LANG = SimpleNamespace()
@@ -144,6 +159,40 @@ def check_max_duration(recording_frame):
                 messagebox.showinfo("通知", f"最大録音時間（{SETTINGS.recording.max_duration_seconds // 3600}時間）に達しました。\n録音を停止しました。")
             except Exception as e:
                 print(f"UI更新エラー: {e}")
+
+
+def find_ffmpeg_executable():
+    """同梱/近傍/環境PATHから ffmpeg 実行ファイルを探す（Windows優先）。"""
+    exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    candidates = []
+    try:
+        # PyInstaller 展開先
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates += [
+                os.path.join(meipass, exe_name),
+                os.path.join(meipass, "ffmpeg", exe_name),
+                os.path.join(meipass, "bin", exe_name),
+            ]
+        # 実行ファイルと同階層
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        candidates += [
+            os.path.join(base, exe_name),
+            os.path.join(base, "ffmpeg", exe_name),
+            os.path.join(base, "bin", exe_name),
+        ]
+    except Exception:
+        pass
+    # 直接存在チェック
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    # PATH から
+    which = shutil.which(exe_name)
+    return which
 
 
 def normalize(sound):
@@ -285,7 +334,7 @@ def mix_audio_channels(mic_audio, system_audio):
 class EzSoundCaptureApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("EZ Sound Capture")
+        self.title("OtoMemo(音メモ)")
         self.geometry("600x400")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -348,12 +397,85 @@ class SourceFrame(ctk.CTkFrame):
                 break
 
 
+class AdsFrame(ctk.CTkFrame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.label = ctk.CTkLabel(self, text="")
+        self.label.grid(row=0, column=0, sticky="nsew")
+        self.label.bind("<Button-1>", self.on_click)
+        self.ads = self.load_ads()
+        self.index = -1
+        self.current_image = None
+        self.after(100, self.next_ad)
+        self.bind("<Configure>", self.on_resize)
+
+    def load_ads(self):
+        folder = SETTINGS.ads.folder
+        images = []
+        cfg_path = os.path.join(folder, 'ads.json')
+        try:
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+                for b in cfg.get('banners', []):
+                    img_path = os.path.join(folder, b.get('image', ''))
+                    link = b.get('link')
+                    images.append((img_path, link))
+        except Exception:
+            pass
+        if not images:
+            for ext in ('*.png','*.jpg','*.jpeg'):
+                for p in glob.glob(os.path.join(folder, ext)):
+                    images.append((p, None))
+        return images
+
+    def next_ad(self):
+        if not self.ads:
+            self.label.configure(text="広告枠", anchor="center")
+            return
+        self.index = (self.index + 1) % len(self.ads)
+        self.show_current()
+        self.after(int(SETTINGS.ads.interval_seconds * 1000), self.next_ad)
+
+    def show_current(self):
+        if not self.ads:
+            return
+        path, _ = self.ads[self.index]
+        try:
+            w = max(self.winfo_width(), 300)
+            h = max(self.winfo_height(), 120)
+            img = Image.open(path).convert("RGBA")
+            size = (max(10, w-20), max(10, h-20))
+            img = img.resize(size, Image.LANCZOS)
+            cimg = ctk.CTkImage(light_image=img, size=size)
+            self.current_image = cimg
+            self.label.configure(image=cimg, text="")
+        except Exception:
+            self.label.configure(text="広告を表示できません", anchor="center")
+
+    def on_click(self, _event):
+        if not self.ads:
+            return
+        _, link = self.ads[self.index]
+        if link:
+            try:
+                webbrowser.open(link)
+            except Exception:
+                pass
+
+    def on_resize(self, _event):
+        try:
+            self.show_current()
+        except Exception:
+            pass
+
 class RecordingFrame(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # 録音時間表示
-        self.grid_rowconfigure(1, weight=1)  # 波形表示（将来的に）
+        self.grid_rowconfigure(1, weight=1)  # 広告枠
         self.grid_rowconfigure(2, weight=0)  # 録音ボタン
         self.grid_rowconfigure(3, weight=0)  # オプション
         self.grid_rowconfigure(4, weight=0)  # 同期調整
@@ -362,9 +484,8 @@ class RecordingFrame(ctk.CTkFrame):
         self.label_time = ctk.CTkLabel(self, text="00:00:00", font=("Arial", 24))
         self.label_time.grid(row=0, column=0, padx=10, pady=10)
         
-        # 波形表示（将来的に）
-        self.waveform_frame = ctk.CTkFrame(self)
-        self.waveform_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        self.ad_frame = AdsFrame(self)
+        self.ad_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         
         # 録音ボタン
         self.button_frame = ctk.CTkFrame(self)
@@ -379,6 +500,7 @@ class RecordingFrame(ctk.CTkFrame):
         # オプション
         self.option_frame = ctk.CTkFrame(self)
         self.option_frame.grid(row=3, column=0, padx=10, pady=10)
+        self.option_frame.grid_remove()
         
         global is_mp3, is_normalize
         is_mp3 = ctk.BooleanVar(value=True)
@@ -394,6 +516,7 @@ class RecordingFrame(ctk.CTkFrame):
         self.sync_frame = ctk.CTkFrame(self)
         self.sync_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
         self.sync_frame.grid_columnconfigure(1, weight=1)
+        self.sync_frame.grid_remove()
         
         self.label_sync = ctk.CTkLabel(self.sync_frame, text="マイク遅延調整:")
         self.label_sync.grid(row=0, column=0, padx=10, pady=5, sticky="w")
@@ -479,10 +602,19 @@ class RecordingFrame(ctk.CTkFrame):
                                 if is_mp3.get():
                                     mp3_path = os.path.join(local_backup_dir, "output.mp3")
                                     try:
-                                        result = subprocess.run([
-                                            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                                        ffmpeg_path = find_ffmpeg_executable()
+                                        if ffmpeg_path:
+                                            # pydub でも同じ ffmpeg を使えるように設定
+                                            try:
+                                                AudioSegment.converter = ffmpeg_path
+                                            except Exception:
+                                                pass
+                                        cmd = [
+                                            ffmpeg_path or 'ffmpeg',
+                                            '-y', '-hide_banner', '-loglevel', 'error',
                                             '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', '128k', mp3_path
-                                        ], capture_output=True)
+                                        ]
+                                        result = subprocess.run(cmd, capture_output=True)
                                         if result.returncode == 0 and os.path.exists(mp3_path):
                                             try:
                                                 os.remove(wav_path)
@@ -490,6 +622,7 @@ class RecordingFrame(ctk.CTkFrame):
                                                 pass
                                         else:
                                             audio = AudioSegment.from_wav(wav_path)
+                                            # pydub の ffmpeg パスは上で設定済み（可能なら）
                                             audio.export(mp3_path, format='mp3', bitrate='128k')
                                             try:
                                                 os.remove(wav_path)

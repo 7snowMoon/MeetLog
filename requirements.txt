@@ -6,3 +6,4 @@ customtkinter
 ffmpeg-python
 pyaudio
 websockets
+Pillow
