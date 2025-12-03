@@ -3,7 +3,4 @@ soundfile
 numpy
 pydub
 customtkinter
-ffmpeg-python
-pyaudio
-websockets
 Pillow
