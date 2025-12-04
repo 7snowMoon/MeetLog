@@ -287,6 +287,54 @@ class GeminiAssistant:
             return response.text
         except Exception as e:
             return f"要約エラー: {e}"
+    
+    def transcribe_audio_file(self, file_path, progress_callback=None):
+        """音声ファイルから文字起こしして議事録を生成"""
+        if not self.is_configured:
+            return None, "Gemini APIが設定されていません"
+        
+        try:
+            if progress_callback:
+                progress_callback("音声ファイルを読み込み中...")
+            
+            with open(file_path, 'rb') as f:
+                audio_bytes = f.read()
+            
+            # ファイルサイズチェック（20MB以下）
+            if len(audio_bytes) > 20 * 1024 * 1024:
+                return None, "ファイルサイズが大きすぎます（20MB以下にしてください）"
+            
+            # MIMEタイプを判定
+            ext = os.path.splitext(file_path)[1].lower()
+            mime_types = {'.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg'}
+            mime_type = mime_types.get(ext, 'audio/mp3')
+            
+            if progress_callback:
+                progress_callback("Geminiで文字起こし中...")
+            
+            # 文字起こし
+            response = self.model.generate_content([
+                "この音声を日本語で詳細に文字起こししてください。話者の発言をそのまま正確に書き起こしてください。",
+                {
+                    "mime_type": mime_type,
+                    "data": base64.b64encode(audio_bytes).decode('utf-8')
+                }
+            ])
+            transcript = response.text.strip()
+            
+            if not transcript or len(transcript) < 10:
+                return None, "音声から文字起こしできませんでした"
+            
+            if progress_callback:
+                progress_callback("議事録を生成中...")
+            
+            # 議事録生成
+            minutes = self.generate_minutes(transcript)
+            
+            return {"transcript": transcript, "minutes": minutes}, None
+            
+        except Exception as e:
+            return None, f"処理エラー: {e}"
 
 gemini_assistant = GeminiAssistant()
 
@@ -521,19 +569,21 @@ class MeetLogApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)  # 右パネル（残りすべて）
         self.grid_rowconfigure(0, weight=1)
         
-        # 左パネル（録音コントロール）
-        left_panel = ctk.CTkFrame(self, fg_color="transparent", width=400)
-        left_panel.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        # 左パネル（録音コントロール）- 暗めの背景
+        left_panel = ctk.CTkFrame(self, fg_color="#1a1a2e", corner_radius=15, width=400)
+        left_panel.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         left_panel.grid_propagate(False)  # 固定幅を維持
         left_panel.grid_columnconfigure(0, weight=1)
         left_panel.grid_rowconfigure(3, weight=1)
         
-        # Header
-        header = ctk.CTkFrame(left_panel, fg_color="transparent")
-        header.grid(row=0, column=0, pady=(0, 10), sticky="ew")
+        # Header（録音セクション）
+        header = ctk.CTkFrame(left_panel, fg_color="#16213e", corner_radius=10)
+        header.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text=f"🎙️ {APP_NAME}", font=ctk.CTkFont(size=28, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(header, text="⚙️", width=40, command=self.show_settings).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(header, text=f"🎙️ {APP_NAME}", font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="#e94560").grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkButton(header, text="⚙️", width=40, command=self.show_settings,
+            fg_color="transparent", hover_color="#0f3460").grid(row=0, column=1, sticky="e", padx=5)
         
         # Source
         self.source_frame = SourceFrame(left_panel)
@@ -547,9 +597,9 @@ class MeetLogApp(ctk.CTk):
         self.history_frame = HistoryFrame(left_panel)
         self.history_frame.grid(row=3, column=0, pady=5, sticky="nsew")
         
-        # 右パネル（会議補助）
+        # 右パネル（会議補助）- 青系の背景
         self.assistant_panel = AssistantPanel(self)
-        self.assistant_panel.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        self.assistant_panel.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         
         # Gemini自動設定
         if gemini_api_key:
@@ -565,31 +615,32 @@ class MeetLogApp(ctk.CTk):
 # ===== 会議補助パネル =====
 class AssistantPanel(ctk.CTkFrame):
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, fg_color="#0f3460", corner_radius=15)
         self.parent = parent
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(3, weight=1)
         
         # ヘッダー
-        header = ctk.CTkFrame(self, fg_color="transparent")
+        header = ctk.CTkFrame(self, fg_color="#1a1a2e", corner_radius=10)
         header.grid(row=0, column=0, padx=15, pady=10, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="🤖 AI会議アシスタント", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(header, text="🤖 AI会議アシスタント", font=ctk.CTkFont(size=20, weight="bold"),
+            text_color="#00d9ff").grid(row=0, column=0, sticky="w", padx=10, pady=8)
         
         # Gemini状態
         self.status_label = ctk.CTkLabel(header, text="⚪ 未設定", font=ctk.CTkFont(size=12))
-        self.status_label.grid(row=0, column=1, sticky="e")
+        self.status_label.grid(row=0, column=1, sticky="e", padx=10)
         self.update_status()
         
         # 文字起こしエリア
-        transcript_frame = ctk.CTkFrame(self)
-        transcript_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        transcript_frame = ctk.CTkFrame(self, fg_color="#16213e", corner_radius=10)
+        transcript_frame.grid(row=1, column=0, padx=15, pady=5, sticky="nsew")
         transcript_frame.grid_columnconfigure(0, weight=1)
         transcript_frame.grid_rowconfigure(1, weight=1)
         
         trans_header = ctk.CTkFrame(transcript_frame, fg_color="transparent")
-        trans_header.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        trans_header.grid(row=0, column=0, padx=10, pady=8, sticky="ew")
         trans_header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(trans_header, text="📝 リアルタイム文字起こし", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
         ctk.CTkButton(trans_header, text="🗑️", width=30, height=25, command=self.clear_transcript).grid(row=0, column=1, padx=2)
@@ -597,7 +648,7 @@ class AssistantPanel(ctk.CTkFrame):
         self.transcript_text = ctk.CTkTextbox(transcript_frame, height=200, font=ctk.CTkFont(size=12))
         self.transcript_text.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
         
-        # ボタンエリア
+        # ボタンエリア（上段：文字起こしから）
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         btn_frame.grid_columnconfigure((0, 1, 2), weight=1)
@@ -607,17 +658,21 @@ class AssistantPanel(ctk.CTkFrame):
         ctk.CTkButton(btn_frame, text="🤔 疑問点を提案", command=self.suggest_questions,
             fg_color=THEME.colors.secondary, height=40).grid(row=0, column=1, padx=5, sticky="ew")
         ctk.CTkButton(btn_frame, text="📄 要約", command=self.summarize,
-            fg_color=THEME.colors.warning, height=40).grid(row=0, column=2, padx=5, sticky="ew")
+            fg_color=THEME.colors.warning, text_color="black", height=40).grid(row=0, column=2, padx=5, sticky="ew")
+        
+        # ファイルから議事録作成ボタン
+        ctk.CTkButton(btn_frame, text="📁 音声ファイルから議事録作成", command=self.generate_from_file,
+            fg_color="#6b5b95", height=35).grid(row=1, column=0, columnspan=3, padx=5, pady=(5,0), sticky="ew")
         
         # AI出力タブ
-        output_frame = ctk.CTkFrame(self)
-        output_frame.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
+        output_frame = ctk.CTkFrame(self, fg_color="#16213e", corner_radius=10)
+        output_frame.grid(row=3, column=0, padx=15, pady=5, sticky="nsew")
         output_frame.grid_columnconfigure(0, weight=1)
         output_frame.grid_rowconfigure(1, weight=1)
         
         # タブボタン
         tab_header = ctk.CTkFrame(output_frame, fg_color="transparent")
-        tab_header.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        tab_header.grid(row=0, column=0, padx=10, pady=8, sticky="ew")
         
         self.current_tab = ctk.StringVar(value="minutes")
         self.tab_buttons = {}
@@ -743,6 +798,50 @@ class AssistantPanel(ctk.CTkFrame):
         self.output_texts[tab_id].delete("1.0", "end")
         self.output_texts[tab_id].insert("end", result)
     
+    def generate_from_file(self):
+        """音声ファイルから議事録を生成"""
+        if not gemini_assistant.is_configured:
+            messagebox.showerror("エラー", "Gemini APIを設定してください")
+            return
+        
+        file_path = filedialog.askopenfilename(
+            title="音声ファイルを選択",
+            filetypes=[
+                ("音声ファイル", "*.mp3 *.wav *.m4a *.ogg"),
+                ("MP3", "*.mp3"),
+                ("WAV", "*.wav"),
+                ("すべて", "*.*")
+            ],
+            initialdir=SETTINGS.paths.recordings
+        )
+        
+        if not file_path:
+            return
+        
+        self.switch_tab("minutes")
+        self.output_texts["minutes"].delete("1.0", "end")
+        self.output_texts["minutes"].insert("end", f"⏳ 処理中: {os.path.basename(file_path)}\n\n")
+        
+        def process():
+            def update_progress(msg):
+                self.after(0, lambda: self._update_progress(msg))
+            
+            result, error = gemini_assistant.transcribe_audio_file(file_path, update_progress)
+            
+            if error:
+                self.after(0, lambda: self._show_result("minutes", f"❌ エラー: {error}"))
+            else:
+                # 文字起こしを表示エリアに追加
+                self.after(0, lambda: self.transcript_text.insert("end", f"【ファイル: {os.path.basename(file_path)}】\n{result['transcript']}\n\n"))
+                # 議事録を表示
+                self.after(0, lambda: self._show_result("minutes", result['minutes']))
+        
+        threading.Thread(target=process, daemon=True).start()
+    
+    def _update_progress(self, msg):
+        self.output_texts["minutes"].delete("1.0", "end")
+        self.output_texts["minutes"].insert("end", f"⏳ {msg}")
+    
     def copy_output(self):
         """出力をクリップボードにコピー"""
         text = self.output_text.get("1.0", "end-1c")
@@ -816,26 +915,26 @@ class RecordingFrame(ctk.CTkFrame):
         btn.grid(row=1, column=0, pady=10)
         
         self.rec_btn = ctk.CTkButton(btn, text=f"⏺️ {t('recording')}", command=self.toggle_recording,
-            width=160, height=50, font=ctk.CTkFont(size=16, weight="bold"),
+            width=120, height=45, font=ctk.CTkFont(size=14, weight="bold"),
             fg_color=THEME.colors.danger, hover_color="#c62828")
-        self.rec_btn.pack(side="left", padx=5)
+        self.rec_btn.pack(side="left", padx=3)
         
         self.pause_btn = ctk.CTkButton(btn, text=f"⏸️ {t('pause')}", command=self.toggle_pause,
-            width=120, height=50, fg_color=THEME.colors.warning, hover_color="#f9a825")
-        self.pause_btn.pack(side="left", padx=5)
+            width=100, height=45, fg_color=THEME.colors.warning, hover_color="#f9a825", text_color="black")
+        self.pause_btn.pack(side="left", padx=3)
         
         # 音声認識トグル
-        self.speech_var = ctk.BooleanVar(value=False)
-        self.speech_btn = ctk.CTkCheckBox(btn, text="🎤 文字起こし", variable=self.speech_var,
-            font=ctk.CTkFont(size=12))
-        self.speech_btn.pack(side="left", padx=15)
+        self.speech_var = ctk.BooleanVar(value=True)  # デフォルトON
+        self.speech_btn = ctk.CTkCheckBox(btn, text="文字起こし", variable=self.speech_var,
+            font=ctk.CTkFont(size=11), width=80)
+        self.speech_btn.pack(side="left", padx=5)
         
         # 音量調整スライダー
         global volume_gain
         volume_gain = ctk.DoubleVar(value=1.5)
         vol_frame = ctk.CTkFrame(self, fg_color="transparent")
-        vol_frame.grid(row=2, column=0, pady=10)
-        ctk.CTkLabel(vol_frame, text="音量:").pack(side="left", padx=5)
+        vol_frame.grid(row=2, column=0, pady=5)
+        ctk.CTkLabel(vol_frame, text="音量:", font=ctk.CTkFont(size=11)).pack(side="left", padx=3)
         self.vol_label = ctk.CTkLabel(vol_frame, text="150%", width=50)
         self.vol_label.pack(side="right", padx=5)
         vol_slider = ctk.CTkSlider(vol_frame, from_=0.5, to=3.0, variable=volume_gain, width=200,
