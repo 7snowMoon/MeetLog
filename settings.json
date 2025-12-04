@@ -1,10 +1,15 @@
 {
-    "gui":{
+    "gui": {
         "lang": "ja"
     },
-    "recording":{
+    "recording": {
         "sample_rate": 44100,
         "backup_interval": 60,
         "silence_threshold": 0.05
+    },
+    "gemini": {
+        "api_key": "AIzaSyDJQmqgHQrclyPL8TTlChusH_XcvfO1uCE",
+        "model": "gemini-1.5-flash",
+        "enabled": false
     }
 }

@@ -4,3 +4,7 @@ numpy
 pydub
 customtkinter
 Pillow
+google-generativeai
+SpeechRecognition
+pyaudio
+pyaudiowpatch
