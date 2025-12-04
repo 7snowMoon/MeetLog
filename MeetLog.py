@@ -88,8 +88,6 @@ mic_buffer = None
 system_buffer = None
 input_source_id = None
 system_source_id = None
-is_mp3 = None
-is_normalize = None
 last_recording_path = None
 
 def convert_seconds(seconds):
@@ -265,17 +263,14 @@ class MeetLogApp(ctk.CTk):
         self.recording_frame = RecordingFrame(main)
         self.recording_frame.grid(row=2, column=0, pady=5, sticky="ew")
         
-        # Bottom
+        # Bottom - 最近の録音のみ
         bottom = ctk.CTkFrame(main, fg_color="transparent")
         bottom.grid(row=3, column=0, pady=5, sticky="nsew")
-        bottom.grid_columnconfigure((0, 1), weight=1)
+        bottom.grid_columnconfigure(0, weight=1)
         bottom.grid_rowconfigure(0, weight=1)
         
-        self.google_frame = GoogleFrame(bottom)
-        self.google_frame.grid(row=0, column=0, padx=(0, 5), sticky="nsew")
-        
         self.history_frame = HistoryFrame(bottom)
-        self.history_frame.grid(row=0, column=1, padx=(5, 0), sticky="nsew")
+        self.history_frame.grid(row=0, column=0, sticky="nsew")
     
     def show_settings(self):
         SettingsWindow(self)
@@ -332,14 +327,17 @@ class RecordingFrame(ctk.CTkFrame):
             width=120, height=50, fg_color=THEME.colors.warning, hover_color="#f9a825")
         self.pause_btn.pack(side="left", padx=5)
         
-        opt = ctk.CTkFrame(self, fg_color="transparent")
-        opt.grid(row=2, column=0, pady=10)
-        
-        global is_mp3, is_normalize
-        is_mp3 = ctk.BooleanVar(value=True)
-        is_normalize = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opt, text=t("mp3_convert"), variable=is_mp3).pack(side="left", padx=15)
-        ctk.CTkCheckBox(opt, text=t("normalize"), variable=is_normalize).pack(side="left", padx=15)
+        # 音量調整スライダー
+        global volume_gain
+        volume_gain = ctk.DoubleVar(value=1.5)
+        vol_frame = ctk.CTkFrame(self, fg_color="transparent")
+        vol_frame.grid(row=2, column=0, pady=10)
+        ctk.CTkLabel(vol_frame, text="音量:").pack(side="left", padx=5)
+        self.vol_label = ctk.CTkLabel(vol_frame, text="150%", width=50)
+        self.vol_label.pack(side="right", padx=5)
+        vol_slider = ctk.CTkSlider(vol_frame, from_=0.5, to=3.0, variable=volume_gain, width=200,
+            command=lambda v: self.vol_label.configure(text=f"{int(v*100)}%"))
+        vol_slider.pack(side="left", padx=5)
     
     def toggle_recording(self):
         global recording, mic_buffer, system_buffer, recording_start_time, last_recording_path
@@ -375,36 +373,46 @@ class RecordingFrame(ctk.CTkFrame):
                     
                     if len(mixed) > 0:
                         wav_path = os.path.join(self.backup_dir, "output.wav")
-                        if is_normalize.get():
-                            peak = float(np.max(np.abs(mixed)))
-                            if peak > 0:
-                                mixed = (mixed / peak) * 0.95
+                        # 音量調整（ゲイン適用）
+                        gain = volume_gain.get()
+                        mixed = mixed * gain
+                        # クリッピング防止
+                        peak = float(np.max(np.abs(mixed)))
+                        if peak > 0.95:
+                            mixed = (mixed / peak) * 0.95
                         sf.write(wav_path, mixed, SETTINGS.recording.sample_rate, subtype='PCM_16')
                         
                         final = wav_path
-                        if is_mp3.get():
-                            mp3_path = os.path.join(self.backup_dir, "output.mp3")
-                            try:
-                                ffmpeg = find_ffmpeg()
-                                subprocess.run([ffmpeg or 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                                    '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', '192k', mp3_path], capture_output=True)
-                                if os.path.exists(mp3_path):
-                                    os.remove(wav_path)
-                                    final = mp3_path
-                            except:
-                                audio = AudioSegment.from_wav(wav_path)
-                                audio.export(mp3_path, format='mp3', bitrate='192k')
+                        # MP3変換
+                        mp3_path = os.path.join(self.backup_dir, "output.mp3")
+                        try:
+                            ffmpeg = find_ffmpeg()
+                            startupinfo = None
+                            if os.name == 'nt':
+                                startupinfo = subprocess.STARTUPINFO()
+                                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                                startupinfo.wShowWindow = subprocess.SW_HIDE
+                            subprocess.run([ffmpeg or 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                                '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', '192k', mp3_path], 
+                                capture_output=True, startupinfo=startupinfo)
+                            if os.path.exists(mp3_path):
                                 os.remove(wav_path)
                                 final = mp3_path
+                        except:
+                            audio = AudioSegment.from_wav(wav_path)
+                            audio.export(mp3_path, format='mp3', bitrate='192k')
+                            os.remove(wav_path)
+                            final = mp3_path
                         
                         global last_recording_path
                         last_recording_path = final
                         self.after(0, lambda: messagebox.showinfo(t("recording_complete"), f"保存: {os.path.abspath(final)}"))
                         
-                        try:
-                            self.master.master.history_frame.refresh()
-                            self.master.master.google_frame.update_last()
-                        except: pass
+                        def update_ui():
+                            try:
+                                self.master.master.history_frame.refresh()
+                            except: pass
+                        self.after(100, update_ui)
                 except Exception as e:
                     traceback.print_exc()
                     self.after(0, lambda: messagebox.showerror(t("error"), str(e)))
@@ -421,53 +429,6 @@ class RecordingFrame(ctk.CTkFrame):
         pause = not pause
         self.pause_btn.configure(text=f"▶️ {t('resume')}" if pause else f"⏸️ {t('pause')}")
 
-class GoogleFrame(ctk.CTkFrame):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.grid_columnconfigure(0, weight=1)
-        
-        ctk.CTkLabel(self, text=f"🔗 {t('google_integration')}", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
-        ctk.CTkLabel(self, text="録音→NotebookLMで議事録作成", font=ctk.CTkFont(size=12), text_color=THEME.colors.text_muted).grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        
-        self.last_label = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=11), text_color=THEME.colors.primary)
-        self.last_label.grid(row=2, column=0, padx=15, pady=5, sticky="w")
-        
-        btn = ctk.CTkFrame(self, fg_color="transparent")
-        btn.grid(row=3, column=0, padx=15, pady=10, sticky="ew")
-        btn.grid_columnconfigure((0, 1), weight=1)
-        
-        ctk.CTkButton(btn, text="📝 NotebookLMで議事録作成", command=self.open_notebooklm, height=45,
-            font=ctk.CTkFont(size=13, weight="bold"), fg_color=THEME.colors.primary).grid(row=0, column=0, columnspan=2, pady=5, sticky="ew")
-        ctk.CTkButton(btn, text="☁️ Google Drive", command=lambda: webbrowser.open("https://drive.google.com"), height=38,
-            fg_color=THEME.colors.secondary).grid(row=1, column=0, pady=5, padx=(0, 3), sticky="ew")
-        ctk.CTkButton(btn, text=f"📁 {t('open_folder')}", command=self.open_folder, height=38, fg_color="#6c757d").grid(row=1, column=1, pady=5, padx=(3, 0), sticky="ew")
-        
-        hint = ctk.CTkFrame(self, fg_color="#2d3748")
-        hint.grid(row=4, column=0, padx=15, pady=(5, 15), sticky="ew")
-        ctk.CTkLabel(hint, text="💡 NotebookLMにMP3をアップロード\n   →AIが議事録を自動作成", font=ctk.CTkFont(size=11), text_color="#a0aec0", justify="left").pack(padx=10, pady=8)
-        
-        self.update_last()
-    
-    def update_last(self):
-        recs = get_recent_recordings(1)
-        if recs:
-            r = recs[0]
-            self.last_label.configure(text=f"📎 最新: {r['name']} ({format_file_size(r['size'])})")
-    
-    def open_notebooklm(self):
-        webbrowser.open("https://notebooklm.google.com/")
-        messagebox.showinfo("NotebookLM", "1. 新しいノートブック作成\n2. ソース追加→ファイルアップロード\n3. 録音ファイルを選択\n4. AIが議事録を生成")
-    
-    def open_folder(self):
-        path = os.path.abspath(SETTINGS.paths.recordings)
-        os.makedirs(path, exist_ok=True)
-        if sys.platform == 'win32':
-            os.startfile(path)
-        elif sys.platform == 'darwin':
-            subprocess.run(['open', path])
-        else:
-            subprocess.run(['xdg-open', path])
-
 class HistoryFrame(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent)
@@ -478,7 +439,8 @@ class HistoryFrame(ctk.CTkFrame):
         header.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="ew")
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(header, text=f"📂 {t('recent_recordings')}", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(header, text="🔄", width=30, height=25, command=self.refresh).grid(row=0, column=1, sticky="e")
+        ctk.CTkButton(header, text="📁", width=30, height=25, command=self.open_folder).grid(row=0, column=1, padx=2, sticky="e")
+        ctk.CTkButton(header, text="🔄", width=30, height=25, command=self.refresh).grid(row=0, column=2, sticky="e")
         
         self.list_frame = ctk.CTkScrollableFrame(self)
         self.list_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
@@ -499,7 +461,28 @@ class HistoryFrame(ctk.CTkFrame):
             ctk.CTkLabel(item, text="🎵", font=ctk.CTkFont(size=16)).grid(row=0, column=0, rowspan=2, padx=8, pady=5)
             ctk.CTkLabel(item, text=r['name'], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=1, sticky="w", padx=5)
             ctk.CTkLabel(item, text=f"{r['date'].strftime('%m/%d %H:%M')} • {format_file_size(r['size'])}", font=ctk.CTkFont(size=10), text_color=THEME.colors.text_muted).grid(row=1, column=1, sticky="w", padx=5)
-            ctk.CTkButton(item, text="▶️", width=30, height=30, command=lambda p=r['path']: os.startfile(p) if sys.platform=='win32' else subprocess.run(['open', p])).grid(row=0, column=2, rowspan=2, padx=5, pady=5)
+            ctk.CTkButton(item, text="📁", width=30, height=30, command=lambda p=r['path']: self.open_file_folder(p)).grid(row=0, column=2, rowspan=2, padx=2, pady=5)
+            ctk.CTkButton(item, text="▶️", width=30, height=30, command=lambda p=r['path']: os.startfile(p) if sys.platform=='win32' else subprocess.run(['open', p])).grid(row=0, column=3, rowspan=2, padx=5, pady=5)
+    
+    def open_file_folder(self, file_path):
+        if file_path and os.path.exists(file_path):
+            path = os.path.abspath(file_path)
+            if sys.platform == 'win32':
+                subprocess.run(['explorer', '/select,', path])
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', '-R', path])
+            else:
+                subprocess.run(['xdg-open', os.path.dirname(path)])
+    
+    def open_folder(self):
+        path = os.path.abspath(SETTINGS.paths.recordings)
+        os.makedirs(path, exist_ok=True)
+        if sys.platform == 'win32':
+            os.startfile(path)
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', path])
+        else:
+            subprocess.run(['xdg-open', path])
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, parent):
