@@ -8,7 +8,7 @@
         "silence_threshold": 0.05
     },
     "gemini": {
-        "api_key": "AIzaSyDJQmqgHQrclyPL8TTlChusH_XcvfO1uCE",
+        "api_key": "AIzaSyAgg9ALt15ZDnwVUuorMN4LOSrUME5-CxM",
         "model": "gemini-1.5-flash",
         "enabled": false
     }

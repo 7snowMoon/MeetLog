@@ -21,7 +21,7 @@ if %errorlevel% neq 0 (
 echo Building EXE file...
 echo.
 
-pyinstaller --name MeetLog --onefile --windowed --noconfirm --clean MeetLog.py
+pyinstaller --name MeetLog --onefile --windowed --noconfirm --clean --icon=icon.ico --add-data "icon.ico;." --add-data "ja.json;." --add-data "en.json;." MeetLog.py
 
 echo.
 if exist "dist\MeetLog.exe" (

@@ -68,15 +68,33 @@ SETTINGS.recording.max_duration_seconds = 7200
 SETTINGS.paths = SimpleNamespace()
 SETTINGS.paths.recordings = "./recordings"
 
-# ===== テーマ =====
+# ===== テーマ（落ち着いたダーク）=====
 THEME = SimpleNamespace()
 THEME.colors = SimpleNamespace()
-THEME.colors.primary = "#4285F4"
-THEME.colors.secondary = "#34A853"
-THEME.colors.warning = "#FBBC04"
-THEME.colors.danger = "#EA4335"
-THEME.colors.text = "#ffffff"
-THEME.colors.text_muted = "#888888"
+THEME.colors.primary = "#5c7cfa"    # 落ち着いた青
+THEME.colors.secondary = "#69db7c"  # 柔らかい緑
+THEME.colors.warning = "#fcc419"    # 落ち着いた黄
+THEME.colors.danger = "#ff6b6b"     # 柔らかい赤
+THEME.colors.text = "#e9ecef"
+THEME.colors.text_muted = "#868e96"
+THEME.colors.bg_dark = "#212529"    # 背景（濃）
+THEME.colors.bg_card = "#2b3035"    # カード背景
+THEME.colors.bg_panel = "#343a40"   # パネル背景
+
+# フォント設定（日本語向けに統一）
+THEME.fonts = SimpleNamespace()
+THEME.fonts.jp = "Yu Gothic UI"  # Windows向け日本語フォント
+
+# CTkFont をラップしてデフォルトフォントを差し替え
+_ORIG_CTKFONT = ctk.CTkFont
+
+class JPCTkFont(ctk.CTkFont):
+    def __init__(self, *args, **kwargs):
+        if "family" not in kwargs:
+            kwargs["family"] = THEME.fonts.jp
+        super().__init__(*args, **kwargs)
+
+ctk.CTkFont = JPCTkFont
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -565,25 +583,30 @@ class MeetLogApp(ctk.CTk):
         self.title(f"🎙️ {APP_NAME} v{APP_VERSION}")
         self.geometry("1600x800")
         self.minsize(1400, 700)
+        
+        # アイコン設定
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
         self.grid_columnconfigure(0, weight=0, minsize=400)  # 左パネル（固定幅）
         self.grid_columnconfigure(1, weight=1)  # 右パネル（残りすべて）
         self.grid_rowconfigure(0, weight=1)
         
-        # 左パネル（録音コントロール）- 暗めの背景
-        left_panel = ctk.CTkFrame(self, fg_color="#1a1a2e", corner_radius=15, width=400)
+        # 左パネル（録音コントロール）
+        left_panel = ctk.CTkFrame(self, fg_color=THEME.colors.bg_dark, corner_radius=15, width=400)
         left_panel.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         left_panel.grid_propagate(False)  # 固定幅を維持
         left_panel.grid_columnconfigure(0, weight=1)
         left_panel.grid_rowconfigure(3, weight=1)
         
         # Header（録音セクション）
-        header = ctk.CTkFrame(left_panel, fg_color="#16213e", corner_radius=10)
+        header = ctk.CTkFrame(left_panel, fg_color=THEME.colors.bg_card, corner_radius=10)
         header.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(header, text=f"🎙️ {APP_NAME}", font=ctk.CTkFont(size=24, weight="bold"),
-            text_color="#e94560").grid(row=0, column=0, sticky="w", padx=10, pady=5)
+            text_color=THEME.colors.text).grid(row=0, column=0, sticky="w", padx=10, pady=5)
         ctk.CTkButton(header, text="⚙️", width=40, command=self.show_settings,
-            fg_color="transparent", hover_color="#0f3460").grid(row=0, column=1, sticky="e", padx=5)
+            fg_color="transparent", hover_color=THEME.colors.bg_panel).grid(row=0, column=1, sticky="e", padx=5)
         
         # Source
         self.source_frame = SourceFrame(left_panel)
@@ -615,18 +638,18 @@ class MeetLogApp(ctk.CTk):
 # ===== 会議補助パネル =====
 class AssistantPanel(ctk.CTkFrame):
     def __init__(self, parent):
-        super().__init__(parent, fg_color="#0f3460", corner_radius=15)
+        super().__init__(parent, fg_color=THEME.colors.bg_panel, corner_radius=15)
         self.parent = parent
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(3, weight=1)
         
         # ヘッダー
-        header = ctk.CTkFrame(self, fg_color="#1a1a2e", corner_radius=10)
+        header = ctk.CTkFrame(self, fg_color=THEME.colors.bg_card, corner_radius=10)
         header.grid(row=0, column=0, padx=15, pady=10, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(header, text="🤖 AI会議アシスタント", font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#00d9ff").grid(row=0, column=0, sticky="w", padx=10, pady=8)
+            text_color=THEME.colors.primary).grid(row=0, column=0, sticky="w", padx=10, pady=8)
         
         # Gemini状態
         self.status_label = ctk.CTkLabel(header, text="⚪ 未設定", font=ctk.CTkFont(size=12))
@@ -634,7 +657,7 @@ class AssistantPanel(ctk.CTkFrame):
         self.update_status()
         
         # 文字起こしエリア
-        transcript_frame = ctk.CTkFrame(self, fg_color="#16213e", corner_radius=10)
+        transcript_frame = ctk.CTkFrame(self, fg_color=THEME.colors.bg_card, corner_radius=10)
         transcript_frame.grid(row=1, column=0, padx=15, pady=5, sticky="nsew")
         transcript_frame.grid_columnconfigure(0, weight=1)
         transcript_frame.grid_rowconfigure(1, weight=1)
@@ -654,18 +677,18 @@ class AssistantPanel(ctk.CTkFrame):
         btn_frame.grid_columnconfigure((0, 1, 2), weight=1)
         
         ctk.CTkButton(btn_frame, text="📋 議事録生成", command=self.generate_minutes,
-            fg_color=THEME.colors.primary, height=40).grid(row=0, column=0, padx=5, sticky="ew")
+            fg_color=THEME.colors.primary, text_color="black", border_width=2, border_color="#000000", height=40).grid(row=0, column=0, padx=5, sticky="ew")
         ctk.CTkButton(btn_frame, text="🤔 疑問点を提案", command=self.suggest_questions,
-            fg_color=THEME.colors.secondary, height=40).grid(row=0, column=1, padx=5, sticky="ew")
+            fg_color=THEME.colors.secondary, text_color="black", border_width=2, border_color="#000000", height=40).grid(row=0, column=1, padx=5, sticky="ew")
         ctk.CTkButton(btn_frame, text="📄 要約", command=self.summarize,
-            fg_color=THEME.colors.warning, text_color="black", height=40).grid(row=0, column=2, padx=5, sticky="ew")
+            fg_color=THEME.colors.warning, text_color="black", border_width=2, border_color="#000000", height=40).grid(row=0, column=2, padx=5, sticky="ew")
         
         # ファイルから議事録作成ボタン
         ctk.CTkButton(btn_frame, text="📁 音声ファイルから議事録作成", command=self.generate_from_file,
-            fg_color="#6b5b95", height=35).grid(row=1, column=0, columnspan=3, padx=5, pady=(5,0), sticky="ew")
+            fg_color="#495057", hover_color="#6c757d", height=35).grid(row=1, column=0, columnspan=3, padx=5, pady=(5,0), sticky="ew")
         
         # AI出力タブ
-        output_frame = ctk.CTkFrame(self, fg_color="#16213e", corner_radius=10)
+        output_frame = ctk.CTkFrame(self, fg_color=THEME.colors.bg_card, corner_radius=10)
         output_frame.grid(row=3, column=0, padx=15, pady=5, sticky="nsew")
         output_frame.grid_columnconfigure(0, weight=1)
         output_frame.grid_rowconfigure(1, weight=1)
