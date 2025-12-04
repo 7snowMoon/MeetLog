@@ -248,18 +248,28 @@ class GeminiAssistant:
             return "Gemini APIが設定されていません"
         try:
             prompt = f"""以下の会議内容から、参加者が確認すべき疑問点や懸念事項を抽出してください。
-会議の進行をサポートする質問を5つ程度提案してください。
 
 【会議内容】
 {transcript_text}
 
-【出力フォーマット】
-## 🤔 確認すべき疑問点・懸念事項
+【出力形式】
+以下の形式で5つ程度、見やすく出力してください：
 
-1. **質問/懸念事項**
-   - 理由: なぜこれを確認すべきか
+━━━━━━━━━━━━━━━━━━━━━━
+❓ 疑問点 1
+━━━━━━━━━━━━━━━━━━━━━━
+【質問】
+ここに質問を書く
 
-箇条書きで簡潔に出力してください。"""
+【背景】
+なぜこの質問が重要か
+
+━━━━━━━━━━━━━━━━━━━━━━
+❓ 疑問点 2
+━━━━━━━━━━━━━━━━━━━━━━
+...
+
+各疑問点を区切り線で明確に分けてください。"""
             response = self.chat.send_message(prompt)
             return response.text
         except Exception as e:
@@ -505,15 +515,16 @@ class MeetLogApp(ctk.CTk):
         load_settings()  # 設定読み込み
         
         self.title(f"🎙️ {APP_NAME} v{APP_VERSION}")
-        self.geometry("1400x800")
-        self.minsize(1200, 700)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        self.geometry("1600x800")
+        self.minsize(1400, 700)
+        self.grid_columnconfigure(0, weight=0, minsize=400)  # 左パネル（固定幅）
+        self.grid_columnconfigure(1, weight=1)  # 右パネル（残りすべて）
         self.grid_rowconfigure(0, weight=1)
         
         # 左パネル（録音コントロール）
-        left_panel = ctk.CTkFrame(self, fg_color="transparent")
+        left_panel = ctk.CTkFrame(self, fg_color="transparent", width=400)
         left_panel.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        left_panel.grid_propagate(False)  # 固定幅を維持
         left_panel.grid_columnconfigure(0, weight=1)
         left_panel.grid_rowconfigure(3, weight=1)
         
@@ -598,21 +609,53 @@ class AssistantPanel(ctk.CTkFrame):
         ctk.CTkButton(btn_frame, text="📄 要約", command=self.summarize,
             fg_color=THEME.colors.warning, height=40).grid(row=0, column=2, padx=5, sticky="ew")
         
-        # AI出力エリア
+        # AI出力タブ
         output_frame = ctk.CTkFrame(self)
         output_frame.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
         output_frame.grid_columnconfigure(0, weight=1)
         output_frame.grid_rowconfigure(1, weight=1)
         
-        out_header = ctk.CTkFrame(output_frame, fg_color="transparent")
-        out_header.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
-        out_header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(out_header, text="💡 AIアシスタント出力", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(out_header, text="📋", width=30, height=25, command=self.copy_output).grid(row=0, column=1, padx=2)
-        ctk.CTkButton(out_header, text="💾", width=30, height=25, command=self.save_output).grid(row=0, column=2, padx=2)
+        # タブボタン
+        tab_header = ctk.CTkFrame(output_frame, fg_color="transparent")
+        tab_header.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
         
-        self.output_text = ctk.CTkTextbox(output_frame, height=250, font=ctk.CTkFont(size=12))
-        self.output_text.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.current_tab = ctk.StringVar(value="minutes")
+        self.tab_buttons = {}
+        
+        tabs = [("minutes", "📋 議事録"), ("questions", "🤔 疑問点"), ("summary", "📄 要約")]
+        for i, (tab_id, tab_name) in enumerate(tabs):
+            btn = ctk.CTkButton(tab_header, text=tab_name, width=100, height=30,
+                command=lambda t=tab_id: self.switch_tab(t),
+                fg_color=THEME.colors.primary if tab_id == "minutes" else "gray30")
+            btn.pack(side="left", padx=2)
+            self.tab_buttons[tab_id] = btn
+        
+        # コピー/保存ボタン
+        ctk.CTkButton(tab_header, text="📋", width=30, height=25, command=self.copy_output).pack(side="right", padx=2)
+        ctk.CTkButton(tab_header, text="💾", width=30, height=25, command=self.save_output).pack(side="right", padx=2)
+        
+        # 各タブのテキストエリア
+        self.output_texts = {}
+        for tab_id, _ in tabs:
+            text_widget = ctk.CTkTextbox(output_frame, height=250, font=ctk.CTkFont(size=12))
+            self.output_texts[tab_id] = text_widget
+        
+        # 初期表示
+        self.output_texts["minutes"].grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.output_text = self.output_texts["minutes"]  # 互換性のため
+    
+    def switch_tab(self, tab_id):
+        """タブを切り替え"""
+        # 全タブを非表示
+        for tid, text_widget in self.output_texts.items():
+            text_widget.grid_forget()
+            self.tab_buttons[tid].configure(fg_color="gray30")
+        
+        # 選択タブを表示
+        self.output_texts[tab_id].grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.tab_buttons[tab_id].configure(fg_color=THEME.colors.primary)
+        self.current_tab.set(tab_id)
+        self.output_text = self.output_texts[tab_id]
     
     def update_status(self):
         if gemini_assistant.is_configured:
@@ -624,7 +667,8 @@ class AssistantPanel(ctk.CTkFrame):
         """文字起こしを追加"""
         if text.strip():
             timestamp = datetime.now().strftime('%H:%M:%S')
-            self.transcript_text.insert("end", f"[{timestamp}] {text}\n")
+            # 読みやすくするため改行を追加
+            self.transcript_text.insert("end", f"[{timestamp}]\n{text}\n\n")
             self.transcript_text.see("end")
             current_transcript.append(f"[{timestamp}] {text}")
     
@@ -645,12 +689,13 @@ class AssistantPanel(ctk.CTkFrame):
             messagebox.showerror("エラー", "Gemini APIを設定してください")
             return
         
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("end", "⏳ 議事録を生成中...")
+        self.switch_tab("minutes")
+        self.output_texts["minutes"].delete("1.0", "end")
+        self.output_texts["minutes"].insert("end", "⏳ 議事録を生成中...")
         
         def generate():
             result = gemini_assistant.generate_minutes(transcript)
-            self.after(0, lambda: self._show_result(result))
+            self.after(0, lambda: self._show_result("minutes", result))
         
         threading.Thread(target=generate, daemon=True).start()
     
@@ -664,12 +709,13 @@ class AssistantPanel(ctk.CTkFrame):
             messagebox.showerror("エラー", "Gemini APIを設定してください")
             return
         
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("end", "⏳ 疑問点を分析中...")
+        self.switch_tab("questions")
+        self.output_texts["questions"].delete("1.0", "end")
+        self.output_texts["questions"].insert("end", "⏳ 疑問点を分析中...")
         
         def suggest():
             result = gemini_assistant.suggest_questions(transcript)
-            self.after(0, lambda: self._show_result(result))
+            self.after(0, lambda: self._show_result("questions", result))
         
         threading.Thread(target=suggest, daemon=True).start()
     
@@ -683,18 +729,19 @@ class AssistantPanel(ctk.CTkFrame):
             messagebox.showerror("エラー", "Gemini APIを設定してください")
             return
         
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("end", "⏳ 要約を生成中...")
+        self.switch_tab("summary")
+        self.output_texts["summary"].delete("1.0", "end")
+        self.output_texts["summary"].insert("end", "⏳ 要約を生成中...")
         
         def do_summarize():
             result = gemini_assistant.summarize_realtime(transcript)
-            self.after(0, lambda: self._show_result(result))
+            self.after(0, lambda: self._show_result("summary", result))
         
         threading.Thread(target=do_summarize, daemon=True).start()
     
-    def _show_result(self, result):
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("end", result)
+    def _show_result(self, tab_id, result):
+        self.output_texts[tab_id].delete("1.0", "end")
+        self.output_texts[tab_id].insert("end", result)
     
     def copy_output(self):
         """出力をクリップボードにコピー"""
@@ -858,75 +905,112 @@ class RecordingFrame(ctk.CTkFrame):
         self.system_speech_running = False
     
     def start_system_audio_recognition(self):
-        """システム音声（YouTube等）の文字起こし"""
+        """システム音声（YouTube等）の文字起こし - 発話区切り検出"""
         if not gemini_assistant.is_configured:
             print("Gemini not configured for system audio recognition")
             return
         
         print("Starting system audio recognition with Gemini...")
         self.system_speech_running = True
+        self.last_processed_position = 0
         
         def recognize_system_loop():
-            temp_buffer = []
             last_process_time = time.time()
+            silence_start = None
+            MIN_INTERVAL = 10  # 最低10秒間隔
+            MAX_INTERVAL = 30  # 最大30秒で強制処理
+            SILENCE_THRESHOLD = 0.02  # 無音判定の閾値（高めに設定）
+            SILENCE_DURATION = 0.8  # 無音が続く時間（秒）
             
             while self.system_speech_running and recording:
                 time.sleep(0.1)
                 
-                # 10秒ごとにシステム音声を処理
-                if time.time() - last_process_time >= 10:
-                    if system_buffer and system_buffer.total_written > 0:
-                        try:
-                            # 最新の10秒分を取得
-                            audio_data = system_buffer.get_all_data()
-                            if len(audio_data) > SETTINGS.recording.sample_rate * 5:  # 5秒以上あれば処理
-                                # 最後の10秒分だけ取得
-                                samples_10sec = SETTINGS.recording.sample_rate * 10
-                                if len(audio_data) > samples_10sec:
-                                    audio_chunk = audio_data[-samples_10sec:]
-                                else:
-                                    audio_chunk = audio_data
-                                
-                                # 一時ファイルに保存
-                                temp_path = os.path.join(SETTINGS.paths.recordings, "temp_system.wav")
-                                sf.write(temp_path, audio_chunk, SETTINGS.recording.sample_rate)
-                                
-                                # Geminiで文字起こし
-                                try:
-                                    # 音声ファイルを読み込んでbase64エンコード
-                                    import base64
-                                    with open(temp_path, 'rb') as f:
-                                        audio_bytes = f.read()
-                                    
-                                    # Geminiに音声を送信
-                                    response = gemini_assistant.model.generate_content([
-                                        "この音声を日本語で文字起こししてください。会話や発言のみを出力してください。音声がない場合は「なし」と返してください。",
-                                        {
-                                            "mime_type": "audio/wav",
-                                            "data": base64.b64encode(audio_bytes).decode('utf-8')
-                                        }
-                                    ])
-                                    text = response.text.strip()
-                                    if text and text != "なし" and text != "空" and len(text) > 2:
-                                        print(f"System audio recognized: {text[:50]}...")
-                                        if self.app_ref:
-                                            self.after(0, lambda t=text: self.app_ref.update_transcript(f"[システム] {t}"))
-                                except Exception as e:
-                                    print(f"Gemini transcription error: {e}")
-                                
-                                # 一時ファイル削除
-                                try:
-                                    os.remove(temp_path)
-                                except:
-                                    pass
-                        except Exception as e:
-                            print(f"System audio processing error: {e}")
+                elapsed = time.time() - last_process_time
+                
+                # 最低10秒経過していない場合はスキップ
+                if elapsed < MIN_INTERVAL:
+                    continue
+                
+                if system_buffer and system_buffer.total_written > 0:
+                    audio_data = system_buffer.get_all_data()
                     
-                    last_process_time = time.time()
+                    # 最新0.5秒の音量をチェック
+                    recent_samples = int(SETTINGS.recording.sample_rate * 0.5)
+                    if len(audio_data) > recent_samples:
+                        recent_audio = audio_data[-recent_samples:]
+                        volume = float(np.abs(recent_audio).mean())
+                        
+                        # 無音検出
+                        if volume < SILENCE_THRESHOLD:
+                            if silence_start is None:
+                                silence_start = time.time()
+                            elif time.time() - silence_start >= SILENCE_DURATION:
+                                # 無音が続いた→区切りとして処理
+                                print(f"Silence detected after {elapsed:.1f}s, processing...")
+                                self._process_system_audio(elapsed)
+                                last_process_time = time.time()
+                                silence_start = None
+                        else:
+                            silence_start = None
+                        
+                        # 最大60秒で強制処理
+                        if elapsed >= MAX_INTERVAL:
+                            print(f"Max interval reached ({MAX_INTERVAL}s), forcing process...")
+                            self._process_system_audio(elapsed)
+                            last_process_time = time.time()
+                            silence_start = None
         
         self.system_speech_thread = threading.Thread(target=recognize_system_loop, daemon=True)
         self.system_speech_thread.start()
         print("System audio recognition thread started")
+    
+    def _process_system_audio(self, duration):
+        """システム音声をGeminiで文字起こし"""
+        try:
+            audio_data = system_buffer.get_all_data()
+            
+            # 処理する音声の長さを計算
+            samples_to_process = int(duration * SETTINGS.recording.sample_rate)
+            if samples_to_process > len(audio_data):
+                samples_to_process = len(audio_data)
+            
+            audio_chunk = audio_data[-samples_to_process:]
+            
+            # 音声が短すぎる場合はスキップ
+            if len(audio_chunk) < SETTINGS.recording.sample_rate * 3:
+                return
+            
+            # 一時ファイルに保存
+            temp_path = os.path.join(SETTINGS.paths.recordings, "temp_system.wav")
+            sf.write(temp_path, audio_chunk, SETTINGS.recording.sample_rate)
+            
+            # Geminiで文字起こし
+            try:
+                with open(temp_path, 'rb') as f:
+                    audio_bytes = f.read()
+                
+                response = gemini_assistant.model.generate_content([
+                    "この音声を日本語で文字起こししてください。話者の発言内容のみを正確に出力してください。音声がない場合や聞き取れない場合は「なし」と返してください。",
+                    {
+                        "mime_type": "audio/wav",
+                        "data": base64.b64encode(audio_bytes).decode('utf-8')
+                    }
+                ])
+                text = response.text.strip()
+                if text and text != "なし" and text != "空" and len(text) > 2:
+                    print(f"System audio recognized ({duration:.1f}s): {text[:50]}...")
+                    if self.app_ref:
+                        self.after(0, lambda t=text: self.app_ref.update_transcript(t))
+            except Exception as e:
+                print(f"Gemini transcription error: {e}")
+            
+            # 一時ファイル削除
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        except Exception as e:
+            print(f"System audio processing error: {e}")
     
     def toggle_recording(self):
         global recording, mic_buffer, system_buffer, recording_start_time, last_recording_path
