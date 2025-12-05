@@ -181,14 +181,18 @@ class GeminiAssistant:
         self.model = None
         self.chat = None
         self.is_configured = False
+        self.last_error = ""  # エラー詳細を保存
         
     def configure(self, api_key):
         global gemini_api_key
+        self.last_error = ""
         if not GEMINI_AVAILABLE:
-            print("Gemini library not available")
+            self.last_error = "Gemini library not available"
+            print(self.last_error)
             return False
         if not api_key:
-            print("API key is empty")
+            self.last_error = "API key is empty"
+            print(self.last_error)
             return False
         try:
             genai.configure(api_key=api_key)
@@ -225,7 +229,8 @@ class GeminiAssistant:
             save_settings()
             return True
         except Exception as e:
-            print(f"Gemini config error: {e}")
+            self.last_error = f"{type(e).__name__}: {str(e)}"
+            print(f"Gemini config error: {self.last_error}")
             traceback.print_exc()
             return False
     
@@ -579,6 +584,10 @@ class MeetLogApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         load_settings()  # 設定読み込み
+        
+        # 保存されたAPIキーがあれば自動接続
+        if gemini_api_key:
+            gemini_assistant.configure(gemini_api_key)
         
         self.title(f"🎙️ {APP_NAME} v{APP_VERSION}")
         self.geometry("1600x800")
@@ -1389,7 +1398,9 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showinfo("成功", "Gemini APIに正常に接続できました")
         else:
             self.api_status.configure(text="❌ 接続失敗", text_color=THEME.colors.danger)
-            messagebox.showerror("エラー", "Gemini APIへの接続に失敗しました。\nAPIキーを確認してください。")
+            # エラー詳細を表示
+            error_detail = gemini_assistant.last_error if gemini_assistant.last_error else "不明なエラー"
+            messagebox.showerror("エラー", f"Gemini APIへの接続に失敗しました。\n\n詳細: {error_detail}")
     
     def save_gemini(self):
         """Gemini設定を保存"""
